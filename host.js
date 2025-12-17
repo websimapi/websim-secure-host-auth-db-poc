@@ -66,7 +66,7 @@ export class HostManager {
 
     async processInput(data) {
         const peer = this.room.peers[data.clientId];
-        if (!peer) return;
+        if (!peer || !peer.username) return;
 
         const username = peer.username;
         let record = await this.localDB.getRecord(username);
@@ -100,6 +100,8 @@ export class HostManager {
         // Handle automated movement (Click to Move)
         // Iterate peers to find active players
         for (const [clientId, peer] of Object.entries(this.room.peers)) {
+            if (!peer || !peer.username) continue;
+
             const record = await this.localDB.getRecord(peer.username);
             if (record && record.col_1.targetX !== null) {
                 const speed = 0.2;
@@ -126,6 +128,8 @@ export class HostManager {
 
     async checkPresence() {
         for (const [clientId, peerData] of Object.entries(this.room.peers)) {
+            if (!peerData || !peerData.username) continue;
+
             const exists = await this.localDB.getRecord(peerData.username);
             if (!exists) {
                 this.log(`Discovered new peer ${peerData.username}, initializing DB row.`);

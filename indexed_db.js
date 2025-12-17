@@ -29,6 +29,7 @@ export class LocalDB {
     }
 
     async getRecord(username) {
+        if (!username) return undefined;
         const db = await this.dbPromise;
         return await db.get(STORE_NAME, username);
     }
