@@ -42,73 +42,96 @@ export class HostManager {
 
         // 5. Cleanup inactive players periodically
         setInterval(() => this.checkPresence(), 5000);
+
+        // 6. Game Logic Loop (Movement Simulation)
+        setInterval(() => this.gameLoop(), 50);
         
         this.log("Host Ready. Waiting for peers.");
     }
 
     async handleRemoteDBUpdate(records) {
-        // As Host, we are the authority. 
-        // We mainly listen to this to ensure our writes landed, 
-        // OR to recover if we crashed and reloaded (fetching from server).
-        
-        // Visualize the DB for the user
         this.updateDBUI(records);
-        
-        // Render the scene based on valid records
         records.forEach(record => {
-            if (record.col_1) {
-                this.visuals.updatePlayer(record.player_id, record.col_1);
+            if (record.col_1 && record.player_username) {
+                this.visuals.updatePlayer(record.player_username, record.col_1);
             }
         });
     }
 
     handleMessage(data) {
-        if (data.type === MSG_TYPES.INPUT_UPDATE) {
+        if (data.type === MSG_TYPES.INPUT_UPDATE || data.type === MSG_TYPES.CLICK_MOVE) {
             this.processInput(data);
         }
     }
 
     async processInput(data) {
-        const playerId = data.clientId;
-        // In a real game, we would validate move distance here to prevent speed hacks.
-        
-        // Fetch current state from memory/IDB
-        let record = await this.localDB.getRecord(playerId);
+        const peer = this.room.peers[data.clientId];
+        if (!peer) return;
+
+        const username = peer.username;
+        let record = await this.localDB.getRecord(username);
         
         if (!record) {
-            // New player or missing record
-            record = createEmptyRow(playerId);
-            this.log(`Created new record for ${playerId}`);
+            record = createEmptyRow(username);
+            this.log(`Created new persistent record for ${username}`);
         }
 
-        // Update Column 1 (Player Data)
-        // Apply input vectors
         const speed = 0.2;
-        if (data.input.w) record.col_1.z -= speed;
-        if (data.input.s) record.col_1.z += speed;
-        if (data.input.a) record.col_1.x -= speed;
-        if (data.input.d) record.col_1.x += speed;
+        if (data.type === MSG_TYPES.INPUT_UPDATE) {
+            // WASD cancels auto-movement
+            record.col_1.targetX = null; 
+            record.col_1.targetZ = null;
+            
+            if (data.input.w) record.col_1.z -= speed;
+            if (data.input.s) record.col_1.z += speed;
+            if (data.input.a) record.col_1.x -= speed;
+            if (data.input.d) record.col_1.x += speed;
+        } else if (data.type === MSG_TYPES.CLICK_MOVE) {
+            record.col_1.targetX = data.target.x;
+            record.col_1.targetZ = data.target.z;
+        }
         
         record.last_updated = Date.now();
-
-        // Save to LocalDB immediately
         await this.localDB.saveRecord(record);
-        
-        // Mark for cloud sync
-        this.pendingUpdates.set(playerId, record);
+        this.pendingUpdates.set(username, record);
+    }
+
+    async gameLoop() {
+        // Handle automated movement (Click to Move)
+        // Iterate peers to find active players
+        for (const [clientId, peer] of Object.entries(this.room.peers)) {
+            const record = await this.localDB.getRecord(peer.username);
+            if (record && record.col_1.targetX !== null) {
+                const speed = 0.2;
+                const dx = record.col_1.targetX - record.col_1.x;
+                const dz = record.col_1.targetZ - record.col_1.z;
+                const dist = Math.sqrt(dx*dx + dz*dz);
+                
+                if (dist < speed) {
+                    record.col_1.x = record.col_1.targetX;
+                    record.col_1.z = record.col_1.targetZ;
+                    record.col_1.targetX = null;
+                    record.col_1.targetZ = null;
+                } else {
+                    record.col_1.x += (dx / dist) * speed;
+                    record.col_1.z += (dz / dist) * speed;
+                }
+                
+                record.last_updated = Date.now();
+                await this.localDB.saveRecord(record);
+                this.pendingUpdates.set(peer.username, record);
+            }
+        }
     }
 
     async checkPresence() {
-        // Check room.peers. If a peer exists but has no DB row, create one.
-        // If a DB row exists but peer is gone, we might mark as inactive.
-        
         for (const [clientId, peerData] of Object.entries(this.room.peers)) {
-            const exists = await this.localDB.getRecord(clientId);
+            const exists = await this.localDB.getRecord(peerData.username);
             if (!exists) {
                 this.log(`Discovered new peer ${peerData.username}, initializing DB row.`);
-                const newRow = createEmptyRow(clientId);
+                const newRow = createEmptyRow(peerData.username);
                 await this.localDB.saveRecord(newRow);
-                this.pendingUpdates.set(clientId, newRow);
+                this.pendingUpdates.set(peerData.username, newRow);
             }
         }
     }
@@ -116,29 +139,23 @@ export class HostManager {
     async syncState() {
         if (this.pendingUpdates.size === 0) return;
 
-        // Process a batch of updates
         const updates = Array.from(this.pendingUpdates.values());
         this.pendingUpdates.clear();
 
-        // Get current remote state to find IDs
         const remoteRecords = this.room.collection(COLLECTION_NAME).getList();
 
         for (const update of updates) {
-            const existingRemote = remoteRecords.find(r => r.player_id === update.player_id);
+            // Find remote record by our custom identity field
+            const existingRemote = remoteRecords.find(r => r.player_username === update.player_username);
             
             try {
                 if (existingRemote) {
-                    // Update existing
                     await this.room.collection(COLLECTION_NAME).update(existingRemote.id, update);
                 } else {
-                    // Create new in cloud
-                    // Note: This might fail if we hit the 1k row limit, 
-                    // in which case we should delete old rows.
                     await this.room.collection(COLLECTION_NAME).create(update);
                 }
             } catch (e) {
                 console.error("Sync failed", e);
-                // Put back in queue?
             }
         }
     }
@@ -147,10 +164,11 @@ export class HostManager {
         const container = document.getElementById('db-visualizer');
         container.innerHTML = '';
         records.forEach(r => {
+            const pUser = r.player_username || 'Unknown';
             const div = document.createElement('div');
             div.className = 'db-row';
             div.innerHTML = `
-                <strong>ID:</strong> ${r.player_id.substring(0,8)}...<br>
+                <strong>USER:</strong> ${pUser}<br>
                 <strong>Pos:</strong> ${r.col_1.x.toFixed(1)}, ${r.col_1.z.toFixed(1)}<br>
                 <strong>Updated:</strong> ${new Date(r.last_updated).toLocaleTimeString()}
             `;

@@ -65,13 +65,15 @@ export class GameVisuals {
             mesh.castShadow = true;
             this.scene.add(mesh);
             this.playerMeshes.set(id, mesh);
-            
-            // Add Label
-            // (Simplified text label logic omitted for brevity, using color to distinguish)
         }
 
         // Interpolate position for smoothness (simple lerp)
-        mesh.position.lerp(new THREE.Vector3(data.x, data.y, data.z), 0.2);
+        const target = new THREE.Vector3(data.x, data.y, data.z);
+        if (mesh.position.distanceTo(target) > 5) {
+            mesh.position.copy(target);
+        } else {
+            mesh.position.lerp(target, 0.2);
+        }
     }
 
     removePlayer(id) {
@@ -92,6 +94,20 @@ export class GameVisuals {
         requestAnimationFrame(() => this.animate());
         this.controls.update();
         this.renderer.render(this.scene, this.camera);
+    }
+
+    getGroundIntersection(clientX, clientY) {
+        const mouse = new THREE.Vector2();
+        mouse.x = (clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(mouse, this.camera);
+
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+        const target = new THREE.Vector3();
+        const intersection = raycaster.ray.intersectPlane(plane, target);
+        return intersection;
     }
 }
 

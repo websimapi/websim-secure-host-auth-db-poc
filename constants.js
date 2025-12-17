@@ -15,12 +15,14 @@ export const COLUMNS = [
 
 export const MSG_TYPES = {
     JOIN_REQUEST: 'join_request',
-    INPUT_UPDATE: 'input_update'
+    INPUT_UPDATE: 'input_update',
+    CLICK_MOVE: 'click_move'
 };
 
-export function createEmptyRow(playerId) {
+export function createEmptyRow(username) {
     const row = {
-        player_id: playerId,
+        username: username,
+        player_username: username, // Explicit field to avoid conflicts with system 'username'
         last_updated: Date.now()
     };
     
@@ -34,7 +36,9 @@ export function createEmptyRow(playerId) {
         y: 1,
         z: (Math.random() - 0.5) * 10,
         color: '#' + Math.floor(Math.random()*16777215).toString(16),
-        active: true
+        active: true,
+        targetX: null, // For click-to-move
+        targetZ: null
     };
 
     return row;

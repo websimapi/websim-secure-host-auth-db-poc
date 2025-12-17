@@ -10,12 +10,13 @@ export class LocalDB {
     }
 
     async init() {
-        this.dbPromise = openDB(DB_NAME, 1, {
+        this.dbPromise = openDB(DB_NAME, 2, {
             upgrade(db) {
-                if (!db.objectStoreNames.contains(STORE_NAME)) {
-                    // Use player_id as the key
-                    db.createObjectStore(STORE_NAME, { keyPath: 'player_id' });
+                // Reset store to use username as key for better identity persistence
+                if (db.objectStoreNames.contains(STORE_NAME)) {
+                    db.deleteObjectStore(STORE_NAME);
                 }
+                db.createObjectStore(STORE_NAME, { keyPath: 'username' });
             },
         });
         await this.dbPromise;
@@ -27,9 +28,9 @@ export class LocalDB {
         await db.put(STORE_NAME, record);
     }
 
-    async getRecord(playerId) {
+    async getRecord(username) {
         const db = await this.dbPromise;
-        return await db.get(STORE_NAME, playerId);
+        return await db.get(STORE_NAME, username);
     }
 
     async getAllRecords() {
@@ -37,9 +38,9 @@ export class LocalDB {
         return await db.getAll(STORE_NAME);
     }
 
-    async deleteRecord(playerId) {
+    async deleteRecord(username) {
         const db = await this.dbPromise;
-        await db.delete(STORE_NAME, playerId);
+        await db.delete(STORE_NAME, username);
     }
 }
 

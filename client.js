@@ -29,9 +29,29 @@ export class ClientManager {
         // 2. Setup Input Listeners
         window.addEventListener('keydown', (e) => this.handleKey(e, true));
         window.addEventListener('keyup', (e) => this.handleKey(e, false));
+        window.addEventListener('mousedown', (e) => this.handleClick(e));
 
         // 3. Input Loop
-        setInterval(() => this.sendInput(), 50); // Send inputs 20 times a second
+        setInterval(() => this.sendInput(), 50); 
+    }
+    
+    handleClick(e) {
+        if (e.target.tagName !== 'CANVAS') return;
+        
+        const intersection = this.visuals.getGroundIntersection(e.clientX, e.clientY);
+        if (intersection) {
+            this.room.send({
+                type: MSG_TYPES.CLICK_MOVE,
+                clientId: this.room.clientId,
+                target: { x: intersection.point.x, z: intersection.point.z }
+            });
+            
+            // Temporary Visual Indicator
+            const el = document.createElement('div');
+            el.style.cssText = `position:absolute;left:${e.clientX}px;top:${e.clientY}px;width:10px;height:10px;background:white;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none;opacity:0.5;`;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 500);
+        }
     }
 
     handleKey(e, isDown) {
@@ -72,22 +92,23 @@ export class ClientManager {
         }
 
         trustedRecords.forEach(record => {
+            const pUser = record.player_username || 'Unknown';
+            
             // Visualize
             const div = document.createElement('div');
             div.className = 'db-row';
-            div.style.borderColor = '#4caf50'; // Green for trusted
+            div.style.borderColor = '#4caf50'; 
             div.innerHTML = `
-                <strong>TRUSTED SOURCE</strong><br>
-                <strong>ID:</strong> ${record.player_id ? record.player_id.substring(0,8) : '?'}<br>
-                <strong>Pos:</strong> ${record.col_1?.x?.toFixed(1) || 0}
+                <strong>USER:</strong> ${pUser}<br>
+                <strong>Pos:</strong> ${record.col_1?.x?.toFixed(1) || 0}, ${record.col_1?.z?.toFixed(1) || 0}
             `;
             container.appendChild(div);
 
             // Update Visuals
-            if (record.col_1 && record.player_id) {
-                this.visuals.updatePlayer(record.player_id, record.col_1);
+            if (record.col_1 && pUser) {
+                this.visuals.updatePlayer(pUser, record.col_1);
                 
-                if (record.player_id === this.room.clientId) {
+                if (pUser === this.user.username) {
                     // Update camera to follow my player
                     this.visuals.controls.target.set(record.col_1.x, record.col_1.y, record.col_1.z);
                     this.visuals.controls.update();
